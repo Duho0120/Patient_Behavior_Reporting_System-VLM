@@ -2,7 +2,9 @@
 # 데이터 및 대용량 파일
 images/
 labels/
+downloads/
 *.zip
+*.tar
 *.tar.gz
 
 # 모델 가중치 및 결과물
@@ -12,4 +14,3 @@ checkpoint/
 # 환경 변수 및 설정
 .env
 .ipynb_checkpoints/
-    
