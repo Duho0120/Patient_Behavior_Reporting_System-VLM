@@ -1,0 +1,15 @@
+
+# 데이터 및 대용량 파일
+images/
+labels/
+*.zip
+*.tar.gz
+
+# 모델 가중치 및 결과물
+outputs/
+checkpoint/
+
+# 환경 변수 및 설정
+.env
+.ipynb_checkpoints/
+    
