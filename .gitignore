@@ -13,4 +13,8 @@ checkpoint/
 
 # 환경 변수 및 설정
 .env
+*.env
 .ipynb_checkpoints/
+
+# 임시 테스트 폴더
+tmp_test/
