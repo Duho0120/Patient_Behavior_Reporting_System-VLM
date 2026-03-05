@@ -2,6 +2,7 @@
 # 데이터 및 대용량 파일
 images/
 labels/
+labels_vlm/
 downloads/
 *.zip
 *.tar

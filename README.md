@@ -6,11 +6,11 @@
 
 | 구분 | 기술 | 도입 이유 |
 |---|---|---|
-| 모델 | MobileVLM v2 1.4B | 경량 VLM, Jetson Orin Nano 배포 가능 (1~2초 추론) |
+| 모델 | MobileVLM v2 1.4B | 경량 VLM, ASUS 17s 노트북 배포 가능 (1~2초 추론) |
 | 학습 | QLoRA (4-bit) | 대형 모델을 효율적으로 학습, 메모리 절감 |
-| 인프라 | Colab (A100/H100) | 대형 모델 고속 학습 |
+| 인프라 | Colab Pro (A100) | 대형 모델 고속 학습 |
 | 라벨링 | Gemini 2.5 Flash API | Teacher-Student 방식, 이미지당 5개 캡션 자동 생성 |
-| 배포 | Jetson Orin Nano | VLM 단독 실시간 추론 (2~3초 간격) |
+| 배포 | ASUS 17s + OpenVINO | NPU + Intel ARC GPU 가속 실시간 추론 |
 
 ## 시스템 아키텍처
 
@@ -33,56 +33,91 @@
 
 ## 프로젝트 진행 단계
 
-### Phase 1: 고품질 학습 데이터 구축 ← **현재 단계**
+### ✅ Phase 1: 고품질 학습 데이터 구축 (완료)
 
 - [x] AI허브 API 연동 및 데이터셋 구조 파악
 - [x] 라벨링 데이터(JSON) 다운로드 및 분석 (217,536개 파일)
-- [x] 데이터 필터링 조건 확정: **측면낙상(SY) + 병원(H_A, H_D, H_B) + C3 카메라**
-- [x] C3 이미지 **5,900장** 확보 (정상 3,230 + 측면낙상 2,670) → Google Drive 업로드 완료
-- [x] SY+C3 라벨링 JSON **3,430개** → Google Drive 업로드 완료
-- [x] Gemini 2.5 Flash API 연동 (REST API 방식)
-- [ ] COCO 스타일 5개 캡션 자동 라벨링 (진행 중)
+- [x] 데이터 필터링: **측면낙상(SY) + 병원(H_A, H_D, H_B) + C3 카메라 → 2,320장**
+- [x] 이미지 원천 데이터 확보 → Google Drive 업로드 완료
+- [x] Gemini 2.5 Flash API 연동 (REST API, Python 3.8 호환)
+- [x] **COCO 스타일 5개 캡션 자동 라벨링 완료 (2,320장 × 5캡션 = 11,600개 샘플)**
+- [x] 라벨링 결과 로컬(`labels_vlm/`) + Google Drive 저장 완료
 
-### Phase 2: QLoRA 기반 파인튜닝
+### 🔄 Phase 2: QLoRA 기반 파인튜닝 ← **현재 단계**
 
-- [ ] MobileVLM 1.4B + QLoRA 어댑터 적용
+- [ ] 학습 포맷 변환: `labels_vlm` JSON → LLaVA instruction tuning 포맷
+- [ ] MobileVLM 1.4B + QLoRA 어댑터 적용 (Colab A100)
 - [ ] 한국어 환자 상태 보고 문체 학습
-- [ ] 하이퍼파라미터 튜닝
+- [ ] 학습/검증 분리 및 성능 평가
 
-### Phase 3: 실시간 감지 로직
+### Phase 3: 모델 경량화 & 변환
 
-- [ ] 2~3초 간격 실시간 캠 영상 분석
-- [ ] 상태 변화 감지 (이전 상태와 비교)
-- [ ] Jetson Orin Nano 배포 (INT4 양자화)
+- [ ] PyTorch → ONNX 변환
+- [ ] ONNX → OpenVINO IR 변환 (Intel NPU/ARC 최적화)
+- [ ] 추론 속도 벤치마크
 
-### Phase 4: 시연 및 보고서 자동화
+### Phase 4: C++ 실시간 추론 파이프라인
 
-- [ ] 실시간 환자 행동 기록
-- [ ] PDF 환자 안전 보고서 자동 생성
+- [ ] OpenVINO C++ API 또는 ONNX Runtime
+- [ ] 실시간 상태 변화 감지 로직
+
+### Phase 5: 배포 & 보고서 자동화
+
+- [ ] ASUS 17s 노트북 배포 (NPU + Intel ARC)
+- [ ] PDF 환자 행동 보고서 자동 생성
 
 ## 데이터셋 정보
 
 - **출처:** [AI허브 - 낙상사고 위험동작 영상-센서 쌍 데이터](https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=71641)
-- **Google Drive:** `fall_dataset/images/` (5,900장) + `fall_dataset/labels/` (3,430개)
+- **Google Drive:** `fall_dataset/images/` + `fall_dataset/labels_vlm/`
 
-### 라벨링 4대 원칙 (Golden Rules)
+### 라벨링 기준 (Golden Rules)
 
-| 규칙 | 조건 | 라벨링 |
-|---|---|---|
-| Fall (최우선) | 바닥 접촉 | 무조건 '낙상 발생' |
-| Bed_Exit | 침대 + 이탈 동작 | "환자가 병상을 이탈중입니다" |
-| No_Bed | 침대 미식별 | '병상 이탈' 사용 금지 |
-| Moving | 서서 걷는 동작 | '이동 중' |
+| 우선순위 | 규칙 | 조건 | 라벨 |
+|---|---|---|---|
+| 1 | **Fall** | 신체 일부가 바닥에 접촉 | `fall` |
+| 2 | **Bed_Exit** | 침대에서 이탈 중인 동작 | `bed_exit` |
+| 3 | **Moving** | 서서 이동 중 | `moving` |
+| 4 | **Resting** | 침대에 누워 있거나 앉아 있음 | `resting` |
+
+### 라벨링 샘플
+
+```json
+{
+  "vlm_labels": {
+    "status": "fall",
+    "captions": [
+      "환자가 침대 밖 바닥에 쓰러진 상태로 발견되었습니다. 즉각적인 환자 상태 확인이 필요합니다.",
+      "현재 환자는 병실 바닥에 누워 있으며, 낙상으로 인한 부상 여부를 신속히 평가해야 합니다.",
+      "환자는 침대에서 떨어진 바닥 매트 위에 엎드린 자세로 완전히 몸이 접촉되어 있습니다.",
+      "낙상이 발생한 것으로 판단되며, 즉각적인 개입이 요구됩니다.",
+      "환자, 침대 이탈 후 바닥에 낙상 발생."
+    ]
+  }
+}
+```
 
 ## 프로젝트 구조
 
 ```
 Patient_Behavior_Reporting_System-VLM/
 ├── Load_Data.ipynb                           # 데이터 다운로드 및 탐색
-├── Labelling_with_Gemini_2.5Flash_API.ipynb  # Gemini API 자동 라벨링
-├── images/                                   # 원천 이미지 데이터 (git 제외)
-├── labels/                                   # 라벨링 JSON 데이터 (git 제외)
+├── Labelling_with_Gemini_2.5Flash_API.ipynb  # Gemini API 자동 라벨링 (Phase 1 완료)
+├── make_images_zip.py                        # 이미지 zip 패키징 스크립트
+├── labels/                                   # 원본 라벨링 JSON (git 제외)
+├── labels_vlm/                               # VLM 라벨링 결과 JSON (git 제외)
 ├── outputs/                                  # 모델 출력 결과 (git 제외)
 ├── .gitignore
+├── PROJECT_PLAN.md                           # 상세 프로젝트 계획 및 의사결정 이력
 └── README.md
 ```
+
+## 포트폴리오 어필 포인트
+
+| 역량 | 상세 |
+|---|---|
+| **VLM 파인튜닝** | Teacher-Student (Gemini → MobileVLM) + QLoRA |
+| **데이터 파이프라인** | AI허브 API 연동, Gemini API 자동 라벨링 (11,600 샘플) |
+| **모델 경량화** | MobileVLM 1.4B, INT4 양자화 |
+| **모델 변환** | PyTorch → ONNX → OpenVINO |
+| **엣지 배포** | ASUS 17s (NPU + Intel ARC) + OpenVINO 실시간 추론 |
