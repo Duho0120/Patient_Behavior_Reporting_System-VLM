@@ -1,21 +1,31 @@
-
-# 데이터 및 대용량 파일
+# 데이터 및 대용량 파일 (Large Data)
+data/images/
+data/**/labels_vlm/
+data/**/labels/
 images/
-labels/
-labels_vlm/
 downloads/
 *.zip
 *.tar
 *.tar.gz
 
-# 모델 가중치 및 결과물
+# 모델 가중치 및 결과물 (Models & Results)
+models/
 outputs/
 checkpoint/
 
-# 환경 변수 및 설정
+# 환경 변수 및 설정 (Environment & Secrets)
 .env
 *.env
 .ipynb_checkpoints/
+API_KEY_to_Labelling.env
 
-# 임시 테스트 폴더
+# 개발 환경 및 캐시 (IDE & Python Cache)
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+.DS_Store
+
+# 임시 테스트 폴더 (Temporary)
 tmp_test/
+/tmp/

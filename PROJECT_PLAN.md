@@ -62,32 +62,57 @@
 ## 3. 전체 파이프라인
 
 ```
-Phase 1: 데이터 구축 (Gemini API 라벨링)        ← 현재 진행 중
-Phase 2: QLoRA 파인튜닝 (MobileVLM 1.4B)
-Phase 3: 모델 변환 (PyTorch → ONNX → OpenVINO)
+Phase 1: 데이터 구축 (Gemini API 라벨링)        ← ✅ 1차 완료
+Phase 2: QLoRA 파인튜닝 (MobileVLM 1.4B)        ← ✅ 1차 완료
+Phase 2.5: 데이터 재라벨링 (Gemini 2.5 Pro)      ← ✅ 라벨링 완료, 검수 중
+Phase 3: 모델 변환 (PyTorch → ONNX → OpenVINO)  ← 대기 (2차 파인튜닝 완료 후)
 Phase 4: C++ 실시간 추론 파이프라인 구축
 Phase 5: ASUS 17s (NPU + Intel ARC) 배포 + 보고서 자동화
 ```
 
-### Phase 1: 데이터 구축 ← **현재**
+### Phase 1: 데이터 구축 ✅ **완료**
 
 - [x] AI허브 라벨링 JSON 다운로드 (217,536개)
 - [x] 필터링: SY(측면낙상) + 병원(H_A,H_D,H_B) + C3 카메라
 - [x] 이미지/라벨 Google Drive 업로드
 - [x] Gemini 2.5 Flash REST API 연동 완료
-- [ ] SY+C3 2,320장 × 5캡션 자동 라벨링
+- [x] SY+C3 2,320장 × 5캡션 자동 라벨링 (`labels_vlm/` 2,320개 JSON)
 
-### Phase 2: QLoRA 파인튜닝
+### Phase 2: QLoRA 파인튜닝 ✅ **완료**
 
-- [ ] MobileVLM 1.4B + QLoRA (Colab)
-- [ ] 대화형 학습 데이터 포맷 (instruction tuning)
-- [ ] 학습/검증 분리, 성능 평가
+- [x] MobileVLM 1.4B + QLoRA (Colab A100, 약 16분)
+- [x] 대화형 학습 데이터 포맷 (instruction tuning, 학습 샘플 1,845개)
+- [x] 학습/검증 분리 (Train 90% / Val 10%), 3 epoch 학습
+- [x] LoRA 어댑터 저장 (`mobilevlm_lora_adapter.zip`, ~57MB)
 
-### Phase 3: 모델 경량화 & 변환
+### Phase 2.5: 데이터 재라벨링 & 2차 파인튜닝 ← **현재 단계**
 
-- [ ] PyTorch → ONNX 변환
-- [ ] ONNX → OpenVINO IR 변환 (Intel NPU/ARC 최적화)
-- [ ] 추론 속도 벤치마크
+- **배경 및 필요성 (1차 시도의 교훈)**: 
+  - 1차 파인튜닝 시 **COCO 데이터셋 스타일(서술형)**을 채택하여 이미지당 5개의 다양하고 긴 정답(Label) 문장을 구성함.
+  - 이로 인해 언어 구사력이 부족한 1.4B 소형 모델이 **지나치게 말을 길게 지어내려는 환각(Hallucination)** 증세를 보임.
+  - 여러 개의 긴 서술형 추론 결과는 목표로 했던 **"1줄 형태의 단답형 보고서(예: `환자 낙상 발생`)" 형식과 구조적으로 상극**이었음.
+  - 쓸데없이 긴 문장을 생성하느라 온디바이스 환경(CPU/NPU)에서 심각한 추론 속도 저하(FPS 병목 현상)가 유발됨.
+  - 명령어(Prompt Engineering) 강제만으로는 소형 모델의 행동 제어에 한계가 있음을 확인.
+- **해결 전략 (온디바이스 최적화)**:
+  - 출력 결과를 극도로 짧고 명확하게 제한(예: `10:00 환자 휴식 중`, `12:46 침대 이탈`)하여 생성 속도를 극대화(FPS 향상)하고 환각을 차단.
+  - COCO 스타일의 다중 묘사를 버리고, 목표로 하는 "예시 보고서" 형식과 100% 동일한 **4가지 단답형 정답(객관식)** 텍스트로 모델을 새롭게 세뇌(2차 파인튜닝).
+  - V2 라벨링의 4가지 고정 상태: `환자 휴식 중`, `환자 이동 중`, `환자 침대 이탈`, `환자 낙상 발생`
+- [x] Gemini 2.5 Pro API 연동 및 단답형(고정 4지선다) 프롬프트 설계 완료
+- [x] v2 파인튜닝 데이터셋(JSON) 재구축 완료 (2,320개 이미지 라벨링 생성)
+- [/] 전용 GUI 도구(`scripts/label_reviewer.py`)를 이용한 라벨 전수 검사 및 교정 (진행 중)
+- [ ] MobileVLM 2차 QLoRA 파인튜닝 진행
+
+### Phase 3: 모델 경량화 & 변환 (보류 및 설계 변경)
+
+- **왜 1차 시도에서 NPU를 쓰지 못하고 CPU로 폴백(Fallback) 되었는가? (한계점 파악)**
+  - **1) 동적 입력 크기(Dynamic Shape) 미지원:** NPU(Intel AI Boost) 하드웨어 특성상 입력과 출력의 크기가 완벽히 고정된(Static Shape) 행렬 연산만 고속으로 처리 가능함. 그러나 VLM 텍스트 생성 특성상 토큰 길이가 계속 변하므로 오픈비노(OpenVINO) 컴파일 단계에서 호환성 에러(`RuntimeError`)가 발생함.
+  - **2) 커스텀 모델 구조의 충돌:** LLaMA 구조에 `CLIPVisionTower`와 `LDPNetV2`(프로젝터)가 결합된 MobileVLM 특성상, 모델을 통째로 OpenVINO IR로 한 번에 변환하려 하면 내부 그래프 로직이 꼬임.
+- **V2 추론 파이프라인 최적화 목표: 하이브리드(Heterogeneous) 분배 전략**
+  - **이론적 한계의 인정:** NPU는 연산 속도는 준수하나, 메모리 대역폭이 좁고 언어 모델의 핵심인 **KV Cache 지원이 빈약**하여 텍스트 생성부(LLoMA)를 올렸을 때 오히려 성능(FPS)과 지능이 저하될 위험성이 존재함. 양자화(INT8)로 인해 언어 생성 문맥이 무너질 우려도 있음.
+  - **하이브리드 분업 전략 (가장 현실적인 대안):**
+    - [ ] **눈(Vision Encoder)은 NPU로:** 가장 고정된 행렬 연산을 요구하는 `CLIP Vision Encoder` 파트만 분할 추출 및 정적 패딩(Static Padding)을 적용하여 NPU(INT8)에 할당.
+    - [ ] **입(Language Decoder)은 GPU/CPU로:** 캐시 관리가 복잡하고 동적으로 길이가 변하는 텍스트 생성 파트는 메모리 대역폭이 넓은 **Intel ARC GPU** 또는 **FP16/BF16 CPU**에 할당.
+    - [ ] **파이프라이닝 구축:** 파이썬(추후 C++) 환경에서 NPU가 추출한 이미지 임베딩 결과값을 GPU/CPU의 언어 모델 입력으로 직렬 전송하여 최종 추론 속도 및 지능 손실 최소화.
 
 ### Phase 4: C++ 추론 파이프라인
 
@@ -121,8 +146,8 @@ Phase 5: ASUS 17s (NPU + Intel ARC) 배포 + 보고서 자동화
 
 | 위치 | 경로 |
 |---|---|
-| 이미지 원본 (로컬) | `C:\...\딥러닝 프로젝트\낙상사고...\이미지\Y\SY\` |
-| 라벨 원본 (로컬) | `프로젝트\labels\이미지\Y\SY\` |
+| 이미지 원본 (로컬) | `C:\Users\ASUS\Desktop\제로베이스\딥러닝 프로젝트\낙상사고 위험동작 영상-센서 쌍 데이터_병원,후면낙상\3.개방데이터\1.데이터\Training\01.원천데이터\TS\이미지\Y\SY` |
+| 라벨 원본 (로컬) | `C:\Users\ASUS\Desktop\제로베이스\Patient_Behavior_Reporting_System-VLM\data\v2\labels_vlm` |
 | Google Drive 이미지 | `G:\내 드라이브\fall_dataset\images\` |
 | Google Drive 라벨 | `G:\내 드라이브\fall_dataset\labels\` |
 | Colab 마운트 | `/content/drive/MyDrive/fall_dataset/` |
@@ -171,13 +196,52 @@ I008~I010: 낙상 (fall)
 }
 ```
 
-### API 호출 정보
+### Gemini API 호출 정보 (Phase 2.5 기준)
 
-- **API**: Gemini 2.5 Flash (REST API, Python 3.8 호환)
-- **URL**: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+- **API**: Gemini 2.5 Pro (고해상도 이미지 분석 및 정교한 라벨링 목적)
 - **API Key**: `API_KEY_to_Labelling.env` 파일에 저장
-- **예상 비용**: SY 2,320장 × ~$0.001 = ~$2.3 (약 3,200원)
-- **예상 시간**: ~8시간 20분 (이미지당 ~13초)
+- **대상 규모**: SY 2,320장 (이미지당 1회 호출)
+- **특이사항**: 429(Quota), 503(Server Demand) 에러를 자동 재시도로 처리하며 안정적 라벨링 수행
+
+---
+
+## 5-2. Phase 2 파인튜닝 결과물
+
+### 학습 결과 요약
+
+| 항목 | 내용 |
+|---|---|
+| 학습 샘플 | 1,845개 (이미지 미매칭 skip, 이론상 11,600개 중) |
+| Train / Val | 90% / 10% |
+| Epochs | 3 |
+| Steps | 345 (1,845 ÷ 16 × 3) |
+| 소요 시간 | 약 16분 (Colab A100) |
+| Batch size | 4 + gradient_accumulation 4 → 실질 16 |
+| Learning rate | 2e-4 (paged_adamw_8bit) |
+| LoRA r / alpha | 16 / 32 |
+
+### 로컬 저장 파일
+
+| 파일 | 설명 |
+|---|---|
+| `mobilevlm_lora_adapter.zip` | LoRA 어댑터 전체 (~57MB) |
+| `training_logs.csv` | step별 학습 손실 기록 |
+| `loss_curve.png` | 학습 손실 시각화 |
+| `labels_vlm/` | Gemini 라벨링 결과 JSON 2,320개 |
+| `labels_vlm.zip` | 위 폴더 압축본 |
+
+### LoRA 어댑터 구성 (`mobilevlm_lora_adapter/`)
+
+```
+adapter_config.json         ← LoRA 설정 (r=16, alpha=32)
+adapter_model.safetensors   ← 학습된 가중치 (핵심)
+tokenizer.json
+tokenizer_config.json
+tokenizer.model
+special_tokens_map.json
+```
+
+> 자세한 파인튜닝 과정: [PHASE2_FINETUNING_NOTES.md](PHASE2_FINETUNING_NOTES.md)
 
 ---
 
